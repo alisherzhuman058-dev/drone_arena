@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Drone Arena</title>
+<style>
+:root{--bg:#f3f4f7;--fg:#14171f;--pn:#fffffff0;--ac:#0a9d6c;--bd:#cfd3dc;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b0d12;--fg:#f2f4f8;--pn:#161a23f0;--ac:#35e0a1;--bd:#2a3040;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b0d12;--fg:#f2f4f8;--pn:#161a23f0;--ac:#35e0a1;--bd:#2a3040;color-scheme:dark}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:15px system-ui,sans-serif}
+#app{height:100%;display:flex;flex-direction:column}
+#st{position:relative;flex:1;min-height:0;background:#000;aspect-ratio:16/9;max-width:100%;margin:0 auto;width:100%}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
+#menu{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;background:#000c;color:#fff}
+#menu[hidden]{display:none}
+#bar{display:flex;gap:8px;align-items:center;padding:8px;background:var(--pn);border-top:1px solid var(--bd)}
+#hint{flex:1;font-size:13px;line-height:1.3}
+button,.b{font:inherit;padding:10px 14px;border-radius:10px;border:1px solid var(--bd);background:var(--pn);color:var(--fg)}
+#b1,#cam{background:var(--ac);color:#000;border:0;font-weight:700}
+.b{cursor:pointer}
+</style></head><body>
+<div id="app">
+<div id="st"><video id="v" playsinline muted></video><canvas id="o" width="960" height="540"></canvas>
+<div id="menu"><h1>Drone Arena</h1><button id="cam">Камера</button><label class="b">Видео из файла<input id="fil" type="file" accept="video/*" hidden></label><p id="err" style="max-width:80%;text-align:center;color:#ff8a95"></p></div></div>
+<div id="bar"><span id="hint"></span><button id="b2">Отмена</button><button id="b3">Сброс</button><button id="b1"></button><button id="mu">🔊</button></div>
+</div>
+<script>
+const $=s=>document.querySelector(s),v=$('#v'),cv=$('#o'),x=cv.getContext('2d'),W=320,H=180,K=3,T=120;
+const pcv=document.createElement('canvas');pcv.width=W;pcv.height=H;const pc=pcv.getContext('2d',{willReadFrequently:true});
+let mode='menu',Z=[],G=[],O=[],cur=[],bg=null,learn=0,zm=null,pos=null,last=0,sc=0,t0=0,msg='',msgT=0,gin=[],gcd=[],ocd=[],ac=null,gdone=[],pops=[],goT=0,mute=false,mt=null,ns=0,cd=0;
+const g=(d,i)=>d[4*i]*.3+d[4*i+1]*.59+d[4*i+2]*.11;
+function pip(p,q){let r=false;for(let i=0,j=q.length-1;i<q.length;j=i++){if((q[i].y>p.y)!=(q[j].y>p.y)&&p.x<(q[j].x-q[i].x)*(p.y-q[i].y)/(q[j].y-q[i].y)+q[i].x)r=!r}return r}
+function tone(f,d,ty='square',vol=.12,at=0){if(!ac||mute)return;const o=ac.createOscillator(),n=ac.createGain(),t=ac.currentTime+at;o.type=ty;o.frequency.value=f;n.gain.setValueAtTime(vol,t);n.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(n).connect(ac.destination);o.start(t);o.stop(t+d)}
+const win=(i=0)=>{const b=[523,587,659,698,784,880][i%6];[b,b*1.25,b*1.5,b*2].forEach((f,j)=>tone(f,.18,'square',.12,j*.07))};
+const bad=()=>{tone(140,.3,'sawtooth',.18);tone(95,.35,'sawtooth',.18,.1)};
+const bass=[55,55,82.4,55,65.4,65.4,98,65.4],lead=[440,0,523,659,0,587,523,0];
+function music(on){clearInterval(mt);if(!on)return;ns=0;mt=setInterval(()=>{const s=ns++%8;tone(bass[s],.22,'triangle',.1);if(lead[s])tone(lead[s],.16,'square',.04)},230)}
+const HINT={zone:'Тапни 4 угла зоны полёта по кругу (включая верх высоких рамок)',gates:'Тапни 4 угла каждой рамки по кругу. Все отметил: «Далее»',obst:'Тапни по центру каждой стойки. Потом «Далее»',bg:'Убери людей и дрон с поля, затем «Запомнить поле»',learn:'Запоминаю поле…',ready:'Готово. Зелёная точка = дрон. Жми СТАРТ',count:'',play:'',end:''};
+const B1={gates:'Далее',obst:'Далее',bg:'Запомнить поле',ready:'СТАРТ',play:'Стоп',end:'Заново'};
+function ui(){$('#hint').textContent=HINT[mode]||'';const b=$('#b1');b.hidden=!B1[mode];b.textContent=B1[mode]||''}
+function mask(){zm=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let i=0;i<W;i++)zm[y*W+i]=pip({x:i*K,y:y*K},Z)?1:0}
+function sv(){try{localStorage.da=JSON.stringify({Z,G,O})}catch(e){}}
+function begin(){$('#menu').hidden=true;mode='zone';try{const s=JSON.parse(localStorage.da);if(s&&s.Z&&s.Z.length==4&&confirm('Использовать сохранённую калибровку?')){Z=s.Z;G=s.G;O=s.O;mask();mode='bg'}}catch(e){}ui()}
+$('#cam').onclick=async()=>{try{v.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:60}},audio:false});await v.play();begin()}catch(e){$('#err').textContent='Камера не открылась ('+(e.name||'')+': '+e.message+'). Открой страницу в Safari или Chrome, а не внутри приложения.'}};
+$('#fil').onchange=e=>{const f=e.target.files[0];if(!f)return;v.src=URL.createObjectURL(f);v.loop=true;v.muted=true;v.play();begin()};
+cv.addEventListener('pointerdown',e=>{const r=cv.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*960,y:(e.clientY-r.top)/r.height*540};
+ if(mode=='zone'){Z.push(p);if(Z.length==4){mask();mode='gates';ui()}}
+ else if(mode=='gates'){cur.push(p);if(cur.length==4){G.push(cur);cur=[]}}
+ else if(mode=='obst')O.push(p)});
+$('#b2').onclick=()=>{if(mode=='zone')Z.pop();else if(mode=='gates')cur.length?cur.pop():G.pop();else if(mode=='obst')O.pop()};
+$('#b3').onclick=()=>{Z=[];G=[];O=[];cur=[];bg=null;pos=null;mode='zone';music(false);ui()};
+$('#mu').onclick=()=>{mute=!mute;$('#mu').textContent=mute?'🔇':'🔊'};
+$('#b1').onclick=()=>{if(mode=='gates'&&cur.length)return;
+ if(mode=='gates')mode='obst';else if(mode=='obst'){sv();mode='bg'}
+ else if(mode=='bg'){bg=null;learn=40;mode='learn'}
+ else if(mode=='ready'||mode=='end')start();else if(mode=='play')end();ui()};
+function start(){ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();sc=0;msg='';gcd=[];gdone=[];pops=[];ocd=[];gin=[];mode='count';cd=5;ui();
+ const tk=()=>{if(cd>0){tone(440,.2,'sine',.2);setTimeout(()=>{cd--;tk()},1000)}else{tone(880,.5,'sine',.2);mode='play';t0=goT=performance.now();music(true);ui()}};tk()}
+function end(){mode='end';music(false);win();ui()}
+function add(p,m,i){sc+=p;msg=m;msgT=performance.now();pops.push({p,t:msgT});p>0?win(i):bad()}
+function ev(t){if(t-t0>T*1000)return end();
+ if(!pos){gin=gin.map(()=>0);return}
+ G.forEach((q,i)=>{gin[i]=pip(pos,q)?(gin[i]||0)+1:0;if(gin[i]==3&&!gdone[i]){gdone[i]=1;add(10,'Ворота '+(i+1)+' +10',i)}});
+ O.forEach((o,i)=>{if(Math.hypot(pos.x-o.x,pos.y-o.y)<32&&t>(ocd[i]||0)){ocd[i]=t+1500;add(-5,'Касание −5')}})}
+function det(){pc.drawImage(v,0,0,W,H);const d=pc.getImageData(0,0,W,H).data,n=W*H;
+ if(!bg){bg=new Float32Array(n);for(let i=0;i<n;i++)bg[i]=g(d,i)}
+ if(mode=='learn'){for(let i=0;i<n;i++)bg[i]+=(g(d,i)-bg[i])*.1;if(--learn<=0){mode='ready';ui()}return}
+ const gw=27,gh=15,c=new Float32Array(gw*gh*3);
+ for(let y=0;y<H;y++)for(let i=0;i<W;i++){const k0=y*W+i,q=g(d,k0);
+  if(zm[k0]&&Math.abs(q-bg[k0])>38){const k=((y/12|0)*gw+(i/12|0))*3;c[k]++;c[k+1]+=i;c[k+2]+=y;bg[k0]+=(q-bg[k0])*.004}
+  else bg[k0]+=(q-bg[k0])*.02}
+ let b=0,bx=0,by=0;
+ for(let j=0;j<gh;j++)for(let i=0;i<gw;i++){let s=0,sx=0,sy=0;
+  for(let dj=-1;dj<2;dj++)for(let di=-1;di<2;di++){const a=i+di,e=j+dj;if(a<0||e<0||a>=gw||e>=gh)continue;const k=(e*gw+a)*3;s+=c[k];sx+=c[k+1];sy+=c[k+2]}
+  if(s>b){b=s;bx=sx/s;by=sy/s}}
+ const t=performance.now();
+ if(b>=6){pos={x:bx*K,y:by*K};last=t}else if(t-last>500)pos=null;
+ if(mode=='play')ev(t)}
+function poly(q,col,close){if(!q.length)return;x.strokeStyle=col;x.lineWidth=3;x.beginPath();q.forEach((p,i)=>i?x.lineTo(p.x,p.y):x.moveTo(p.x,p.y));if(close)x.closePath();x.stroke();q.forEach(p=>{x.fillStyle=col;x.beginPath();x.arc(p.x,p.y,5,0,7);x.fill()})}
+function draw(){x.clearRect(0,0,960,540);
+ if(mode=='menu')return;
+ poly(Z,'#ffd23f',Z.length==4);G.forEach(q=>poly(q,'#35e0a1',true));poly(cur,'#35e0a1',false);
+ O.forEach(o=>{x.strokeStyle='#ff5a6a';x.lineWidth=3;x.beginPath();x.arc(o.x,o.y,32,0,7);x.stroke()});
+ if(pos&&mode!='zone'&&mode!='gates'&&mode!='obst'){x.strokeStyle='#35e0a1';x.lineWidth=4;x.beginPath();x.arc(pos.x,pos.y,18,0,7);x.stroke()}
+ if(mode=='play'||mode=='end'||mode=='count'){x.fillStyle='rgba(0,0,0,.6)';x.fillRect(12,12,240,104);x.fillStyle='#fff';x.font='bold 44px system-ui';x.fillText('★ '+sc,24,62);
+  const left=mode=='play'?Math.max(0,T-(performance.now()-t0)/1000):T;x.font='22px system-ui';x.fillText('⏱ '+Math.ceil(left)+' c',24,98);
+  if(performance.now()-msgT<1500){x.font='bold 26px system-ui';x.fillStyle=sc&&msg.includes('+')?'#35e0a1':'#ff5a6a';x.fillText(msg,270,50)}pops=pops.filter(q=>performance.now()-q.t<1500);pops.forEach(q=>{const a=performance.now()-q.t;x.globalAlpha=1-a/1500;x.fillStyle=q.p>0?'#35e0a1':'#ff5a6a';x.font='bold 40px system-ui';x.fillText((q.p>0?'+':'−')+Math.abs(q.p),24,156+a/1500*50);x.globalAlpha=1})}
+ if(mode=='count'){x.fillStyle='#fff';x.font='bold 160px system-ui';x.textAlign='center';x.fillText(cd||'',480,320);x.textAlign='left'}
+ if(mode=='play'&&performance.now()-goT<1200){x.fillStyle='#35e0a1';x.font='bold 150px system-ui';x.textAlign='center';x.fillText('START!',480,320);x.textAlign='left'}
+ if(mode=='end'){x.fillStyle='rgba(0,0,0,.7)';x.fillRect(240,200,480,140);x.fillStyle='#fff';x.textAlign='center';x.font='bold 54px system-ui';x.fillText('Итог: '+sc,480,285);x.textAlign='left'}}
+function loop(){requestAnimationFrame(loop);if(v.readyState<2||!zm)return draw();if(['learn','ready','play','count'].includes(mode))det();draw()}
+loop();ui();
+</script></body></html>
